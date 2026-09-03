@@ -1,0 +1,13 @@
+# Virtual environment
+.venv/
+.agents/
+
+# Google Service Account credentials
+service_account.json
+
+# Generated logs and test/interpreter caches
+logs/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+pytest-cache-files-*/

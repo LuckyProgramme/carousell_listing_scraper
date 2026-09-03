@@ -1,0 +1,34 @@
+[project]
+name = "deal-finder"
+version = "0.1.0"
+description = "Carousell deal finder and price matcher"
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "gspread>=6.0",
+    "rapidfuzz>=3.0",
+]
+
+[project.scripts]
+deal-finder = "deal_finder.deal_finder:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deal_finder"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+norecursedirs = [".venv", "__pycache__", ".pytest_cache", "pytest-cache-files-*"]
+markers = [
+    "live: makes a real request to Carousell (disabled unless RUN_LIVE_CAROUSELL_TESTS=1)",
+]
