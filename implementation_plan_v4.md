@@ -3,9 +3,10 @@
 > Revised again: adds an auto-generated variant-token pre-filter, negation-aware condition scanning, targeted freebie extraction, listing-ID dedup on History, and a rapidfuzz swap.
 
 ---
-# Important Variables 
-  [EMAIL_ADDRESS]: "dealfinder0322@gmail.com"
-  [PASSWORD]: "2_Malonzo_2" 
+# Important Variables
+
+Credentials are kept in the local service-account configuration and are never
+stored in this repository or in project documentation.
 
 
 
@@ -337,7 +338,7 @@ Run `uv sync` in `deal-finder` to create the virtual environment and install all
 
 *(unchanged from v3 — Create Project → Enable Sheets + Drive APIs → Create Service Account → Download JSON Key → Access the already made deal_finder worksheet on the shared accesss on the google account I set for this project) 
 
-*(email to be used: [EMAIL_ADDRESS] and the password is a strong one)
+*Use the authorized project account and keep all credentials outside this repository.*
 
 ---
 
