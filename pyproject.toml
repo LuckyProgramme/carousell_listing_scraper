@@ -32,3 +32,4 @@ norecursedirs = [".venv", "__pycache__", ".pytest_cache", "pytest-cache-files-*"
 markers = [
     "live: makes a real request to Carousell (disabled unless RUN_LIVE_CAROUSELL_TESTS=1)",
 ]
+
