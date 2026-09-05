@@ -1,9 +1,20 @@
 # Virtual environment
 .venv/
+
+# Agents and skills
 .agents/
 
-# Google Service Account credentials
-service_account.json
+# Sensitive credentials and local config
+service_account*.json
+credentials*.json
+*.json.key
+*.pem
+*.key
+configinfolater.txt
+*.env
+.env
+.env.*
+!.env.example
 
 # Generated logs and test/interpreter caches
 logs/
@@ -11,3 +22,22 @@ logs/
 __pycache__/
 *.py[cod]
 pytest-cache-files-*/
+
+# Local LLM weights and cache
+models/
+*.gguf
+*.bin
+
+# OS and Editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/ 
+
+.test-tmp/ 
+.uv-cache/
+tests/ 
+
+pytest_tmp_hybrid/
+
+implementation_plan_v2.md
