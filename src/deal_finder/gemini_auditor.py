@@ -8,6 +8,7 @@ per-chunk request timeout explicit, and keeps retry behaviour testable.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -540,6 +541,7 @@ def audit_batch(
     successful_chunks = 0
 
     for chunk_number, chunk in enumerate(candidate_chunks, start=1):
+        logging.info('Auditing chunk %d/%d (%d candidates)', chunk_number, len(candidate_chunks), len(chunk))
         http_status: int | None = None
         request_attempts = 0
         try:

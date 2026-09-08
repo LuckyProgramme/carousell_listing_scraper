@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html as html_lib
 import json
+import logging
 import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -16,6 +17,7 @@ from bs4 import BeautifulSoup, Tag
 
 from .config import CATEGORY_URL, CATEGORY_URLS_BY_NAME, HEADERS, REQUEST_DELAY_SECONDS
 from .models import parse_bundle_check
+from .metadata import extract_metadata
 from .candidate_filter import BUNDLE_PRICE_MULTIPLIER
 
 
@@ -320,7 +322,8 @@ def _normalise_card(card: Mapping[str, Any], base_url: str) -> dict[str, Any] | 
     title = _first_string(card, ("title", "name", "listingTitle"))
     if not title:
         return None
-    listing_id = _first_string(card, ("id", "listingId", "listingID", "listing_id"))
+    listing_id = next((str(card[key]) for key in ("id", "listingId", "listingID", "listing_id")
+                       if isinstance(card.get(key), (str, int)) and not isinstance(card[key], bool)), "")
     raw_link = _first_string(card, ("url", "listingUrl", "listing_url", "urlPath", "path", "href"))
     return {
         "id": listing_id,
@@ -330,6 +333,7 @@ def _normalise_card(card: Mapping[str, Any], base_url: str) -> dict[str, Any] | 
         "description": _description_from(card),
         "link": _listing_link(title, listing_id, raw_link, base_url),
         "seller": _seller_from(card),
+        **extract_metadata(card),
     }
 
 
@@ -593,6 +597,7 @@ def scrape_sources(
     description_cache: dict[tuple[str, str], str] = {}
     try:
         for index, source in enumerate(sources):
+            logging.info("Scraping source %d/%d: %s", index + 1, len(sources), source.query or source.category)
             if index and delay_seconds:
                 time.sleep(delay_seconds)
             page_html, status, attempts, final_url = _fetch_html_with_metadata(

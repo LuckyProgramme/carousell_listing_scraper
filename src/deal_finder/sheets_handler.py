@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
@@ -137,6 +138,21 @@ class SheetPermissionError(RuntimeError):
     """Raised when the service account has insufficient permissions or cannot open the spreadsheet."""
 
 
+def extract_spreadsheet_id(value: str) -> str:
+    """Accept a raw workbook ID or a Google Sheets URL, including query/fragment suffixes."""
+    value = str(value or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return value
+    parsed = urlsplit(value)
+    if parsed.scheme in {"http", "https"} and parsed.hostname == "docs.google.com" and not parsed.username:
+        if parsed.path.startswith('/spreadsheets/d/e/'):
+            raise ValueError('Published Sheet links do not contain the editable workbook ID. Copy the URL from the Google Sheets editor.')
+        match = re.fullmatch(r"/spreadsheets/(?:u/\d+/)?d/([A-Za-z0-9_-]+)(?:/.*)?", parsed.path)
+        if match:
+            return match.group(1)
+    raise ValueError("Enter a Google Sheets URL (https://docs.google.com/spreadsheets/d/<ID>/edit) or spreadsheet ID.")
+
+
 def get_service_account_email(service_account_file: Path | str | None = None) -> str | None:
     """Read client_email from the service account JSON file without network requests."""
     sa_path = Path(service_account_file or SERVICE_ACCOUNT_FILE)
@@ -160,7 +176,7 @@ def open_deal_finder_spreadsheet(
     Reports clear, actionable diagnostics on permission and connection failures.
     """
     sa_path = Path(service_account_file or SERVICE_ACCOUNT_FILE)
-    target_id = spreadsheet_id or SPREADSHEET_ID
+    target_id = extract_spreadsheet_id(spreadsheet_id if spreadsheet_id is not None else SPREADSHEET_ID)
     sa_email = get_service_account_email(sa_path) or "unknown service account"
 
     if not sa_path.exists():
@@ -183,6 +199,11 @@ def open_deal_finder_spreadsheet(
             f"Spreadsheet '{target_id}' not found or service account has no access. "
             f"Please share the Google Sheet with '{sa_email}' as 'Editor'."
         ) from exc
+    except PermissionError as exc:
+        raise SheetPermissionError(
+            f"Access denied (HTTP 403) to spreadsheet '{target_id}'. "
+            f"Open Google Sheets -> Share -> add '{sa_email}' as 'Editor'."
+        ) from exc
     except gspread.exceptions.APIError as exc:
         code = getattr(exc.response, "status_code", None) if hasattr(exc, "response") else None
         if code in (403, 404):
@@ -199,7 +220,7 @@ class PermissionValidationResult:
 
     valid: bool
     can_read: bool
-    can_write: bool
+    can_write: bool | None
     service_account_email: str | None
     spreadsheet_id: str
     spreadsheet_title: str | None = None
@@ -217,7 +238,10 @@ def validate_sheet_permissions(
     Defaults to validation only. Does NOT modify sheet permissions, does NOT
     grant external access, and performs zero external mutations.
     """
-    target_id = spreadsheet_id or SPREADSHEET_ID
+    try:
+        target_id = extract_spreadsheet_id(spreadsheet_id if spreadsheet_id is not None else SPREADSHEET_ID)
+    except ValueError as exc:
+        return PermissionValidationResult(False, False, False, None, str(spreadsheet_id or ""), error_message=str(exc))
     sa_path = Path(service_account_file or SERVICE_ACCOUNT_FILE)
     sa_email = get_service_account_email(sa_path)
 
@@ -264,12 +288,12 @@ def validate_sheet_permissions(
     return PermissionValidationResult(
         valid=True,
         can_read=can_read,
-        can_write=True,
+        can_write=None,
         service_account_email=sa_email,
         spreadsheet_id=target_id,
         spreadsheet_title=title,
         error_message=None,
-        diagnostic_guidance=None,
+        diagnostic_guidance="Read access verified. Editor access cannot be inferred from reading; confirm the service account is an Editor in Google Sheets -> Share.",
     )
 
 

@@ -36,7 +36,12 @@ Thumbs.db
 
 .test-tmp/ 
 .uv-cache/
-tests/ 
+tests/*
+!tests/test_phase234.py
+!tests/test_scraper.py
+!tests/test_sheets_writer.py
+.phase-tests*/
+.phase-tests*.png
 
 pytest_tmp_hybrid/
 

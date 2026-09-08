@@ -8,10 +8,12 @@ dependencies = [
     "requests>=2.31",
     "gspread>=6.0",
     "rapidfuzz>=3.0",
+    "nicegui>=3.0,<4",
 ]
 
 [project.scripts]
 deal-finder = "deal_finder.deal_finder:main"
+deal-finder-ui = "deal_finder.web_ui:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -32,4 +34,3 @@ norecursedirs = [".venv", "__pycache__", ".pytest_cache", "pytest-cache-files-*"
 markers = [
     "live: makes a real request to Carousell (disabled unless RUN_LIVE_CAROUSELL_TESTS=1)",
 ]
-

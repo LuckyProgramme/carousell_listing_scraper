@@ -27,7 +27,7 @@ Install the runtime dependencies manually when `pyproject.toml` is not included:
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install beautifulsoup4 requests gspread rapidfuzz
+python -m pip install beautifulsoup4 requests gspread rapidfuzz "nicegui>=3.0,<4"
 ```
 
 Install `pytest` as well if you want to run the test suite:
@@ -111,6 +111,29 @@ python -m deal_finder.deal_finder
 ```
 
 Normal runs write validated results to `Current Deals`, `All Listings`, and `History`. Only Gemini-approved deals are published when Gemini is available. Local fallback decisions remain comparison data in audit mode.
+
+## Web dashboard
+
+Install dependencies and start the local NiceGUI app:
+
+```powershell
+uv sync
+uv run deal-finder-ui
+```
+
+The dashboard opens at `http://127.0.0.1:8080`. Use `--port 8081` to change the port or `--no-browser` to suppress opening a browser. It binds to localhost and is intended for personal use.
+
+Paste a Google Sheets editor URL or raw workbook ID into the connection field. **Validate connection** checks read access without changing permissions or spreadsheet contents. Share the workbook with the displayed service account email as Editor in Google Sheets. Read access alone does not prove Editor access. Published `/d/e/` links are not workbook IDs. `SPREADSHEET_ID` in `.env` also accepts a full editor URL.
+
+The run button starts the existing pipeline in a background thread. Progress shows completed stages; the live log drawer reports source fetches and audit activity. Counters show scanned listings, candidates, and accepted deals. Only one run or Price List operation can execute at a time across browser tabs; a run continues if you disconnect. Results and logs remain in memory until the app stops.
+
+**Audit only** is enabled initially: it produces a local report and does not write Sheets. Turn it off to publish to Current Deals, All Listings, and History. Cards show thumbnails when available, savings against your Deal Price target, condition, seller reviews, likes, meetup location, listing date, and a direct Carousell link. Gemini confidence and local lexical scores have distinct labels. Use the filter to search results; cards are sorted by savings.
+
+In **Price List**, load the catalog, select an item to edit, or choose **Add new item**. **Save item** validates prices and search settings before writing that row. Delete asks for confirmation. Custom columns and surrounding rows retain their values. If the sheet changed since loading, reload before saving; this check detects stale edits but cannot make concurrent Google Sheets edits transactional. **Initialize empty Price List** creates/seeds a missing or empty catalog using the existing defaults.
+
+Metadata extraction reads optional values from `listingCards`, including nested photos/sellers and meetup fields. Missing or malformed metadata stays empty. Unix seconds/milliseconds and ISO timestamps normalize to UTC ISO 8601; timezone-free dates assume UTC, and relative dates are left empty. Output tabs use white bold navy headers (`#1A365D`), green confidence cells (`#1B5E20`), condition colors, and bold PHP currency values. Only generated thumbnail formulas are evaluated; listing text is written as raw values.
+
+Implementation references: [NiceGUI background I/O](https://nicegui.io/documentation/section_action_events), [Google Sheets formatting](https://developers.google.com/workspace/sheets/api/samples/formatting).
 
 ## Current matching behavior
 

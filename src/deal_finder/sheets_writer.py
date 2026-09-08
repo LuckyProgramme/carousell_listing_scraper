@@ -12,6 +12,8 @@ from gspread.exceptions import WorksheetNotFound
 
 from .config import ALL_LISTINGS_TAB, CURRENT_DEALS_TAB, HISTORY_TAB
 from .sheets_handler import open_deal_finder_spreadsheet
+from .sheet_formatting import format_worksheet
+from .metadata import http_url
 
 CURRENT_DEALS_HEADERS = (
     "Item Name",
@@ -172,9 +174,9 @@ def _format_seller_rating(item: Mapping[str, Any]) -> str:
 
 
 def _format_thumbnail(item: Mapping[str, Any]) -> str:
-    url = str(item.get("thumbnail_url") or "").strip()
-    if url.startswith("http://") or url.startswith("https://"):
-        return f'=IMAGE("{url}")'
+    url = http_url(item.get("thumbnail_url"))
+    if url:
+        return '=IMAGE("' + url.replace('"', '""') + '")'
     return ""
 
 
@@ -209,10 +211,19 @@ def _overwrite_tab(
     headers: Sequence[str],
     rows: Sequence[Sequence[Any]],
 ) -> None:
+    if worksheet.row_count < len(rows) + 1 or worksheet.col_count < len(headers):
+        worksheet.resize(rows=max(worksheet.row_count, len(rows) + 1), cols=max(worksheet.col_count, len(headers)))
     worksheet.clear()
     worksheet.update(
         range_name="A1", values=[list(headers), *[list(row) for row in rows]]
     )
+    # Only generated IMAGE formulas are interpreted; scraped text remains RAW.
+    if rows and 'Thumbnail' in headers:
+        column = headers.index('Thumbnail')
+        letter = _column_letter(column + 1)
+        worksheet.batch_update([{'range': f'{letter}2:{letter}{len(rows) + 1}',
+                                 'values': [[row[column]] for row in rows]}], value_input_option='USER_ENTERED')
+    format_worksheet(worksheet, headers, rows)
 
 
 def _current_deal_row(deal: Mapping[str, Any]) -> list[Any]:
@@ -350,6 +361,7 @@ def write_history(
         worksheet.batch_update(last_seen_updates)
     if new_rows:
         worksheet.append_rows(new_rows)
+    format_worksheet(worksheet, header_row, [*existing_values[1:], *new_rows])
     return appended, updated
 
 

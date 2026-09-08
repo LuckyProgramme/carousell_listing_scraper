@@ -132,15 +132,25 @@ def run_pipeline(
     dry_run: bool = False,
     audit_report_writer: Callable[[CascadeResult, Path], Path] = write_audit_report,
     audit_log_dir: Path = AUDIT_LOG_DIR,
+    on_progress: Callable[[str, float, Mapping[str, int]], None] | None = None,
+    on_deals: Callable[[Sequence[Mapping[str, Any]]], None] | None = None,
 ) -> dict[str, Any]:
     """Run scrape → match → write, returning counts suitable for logging or a CLI."""
+    def progress(stage: str, fraction: float, **counts: int) -> None:
+        logging.info("%s", stage)
+        if on_progress is not None:
+            on_progress(stage, fraction, counts)
+
+    progress('Loading Price List', 0.05)
     reference_rows = (
         read_price_list()
         if read_price_list is not None
         else read_price_list_rows(initialize=not dry_run)
     )
+    progress('Scraping Carousell', 0.15)
     scrape_batch = scrape_targets(reference_rows)
     listings = list(scrape_batch.listings)
+    progress('Matching and auditing listings', 0.50, scraped=len(listings))
     cascade = run_cascade(
         listings, reference_rows, include_local_fallback=dry_run
     )
@@ -174,6 +184,8 @@ def run_pipeline(
             cascade.audit_result.http_status or "none",
             cascade.audit_result.endpoint or "unknown",
         )
+    progress('Writing audit report' if dry_run else 'Updating Google Sheets', 0.85,
+             scraped=len(cascade.listings), candidates=len(cascade.candidates), deals=len(cascade.deals))
     if dry_run:
         report_path = audit_report_writer(cascade, audit_log_dir)
         write_summary: Mapping[str, int] = {
@@ -202,6 +214,9 @@ def run_pipeline(
         summary.get("history_appended", 0),
         summary.get("history_updated", 0),
     )
+    if on_deals is not None:
+        on_deals(cascade.deals)
+    progress('Complete', 1.0, scraped=summary['scraped'], candidates=summary['candidates'], deals=summary['deals'])
     return summary
 
 
