@@ -1,0 +1,77 @@
+name: Deal Finder scan
+run-name: Deal Finder scan ${{ inputs.scan_run_id }}
+
+"on":
+  workflow_dispatch:
+    inputs:
+      scan_run_id:
+        description: The queued Supabase scan UUID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Supplementary repository-wide serialization; Supabase remains the scan lock.
+concurrency:
+  group: deal-finder-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out scanner
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate required configuration without network access
+        id: validate_config
+        run: python3 scripts/fail_queued_scan.py --validate-only
+        env:
+          SCAN_RUN_ID: ${{ inputs.scan_run_id }}
+          ALLOWED_USER_ID: ${{ secrets.ALLOWED_USER_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Set up pinned uv without remote caches
+        id: setup_uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.24"
+          enable-cache: false
+          restore-cache: false
+          save-cache: false
+          cache-python: false
+
+      - name: Install Python 3.12
+        id: install_python
+        run: uv python install 3.12
+
+      - name: Install locked runtime dependencies
+        id: install_dependencies
+        run: uv sync --locked --no-dev --python 3.12
+
+      - name: Execute the requested scan once
+        id: worker
+        run: .venv/bin/python -m deal_finder.scan_job
+        env:
+          SCAN_RUN_ID: ${{ inputs.scan_run_id }}
+          ALLOWED_USER_ID: ${{ secrets.ALLOWED_USER_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Fail only still-queued work after a setup failure
+        id: finalize_setup_failure
+        if: >-
+          ${{ failure() && !cancelled() && steps.checkout.outcome == 'success' && steps.worker.outcome == 'skipped' && (steps.validate_config.outcome == 'failure' || steps.setup_uv.outcome == 'failure' || steps.install_python.outcome == 'failure' || steps.install_dependencies.outcome == 'failure') }}
+        run: python3 scripts/fail_queued_scan.py
+        env:
+          SCAN_RUN_ID: ${{ inputs.scan_run_id }}
+          ALLOWED_USER_ID: ${{ secrets.ALLOWED_USER_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}

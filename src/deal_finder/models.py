@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import re
 import math
+import re
+import hashlib
+import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Any, Literal, Mapping, Sequence
+from urllib.parse import urlsplit
 
 
 AuditSource = Literal["gemini", "local_fallback"]
+SearchMode = Literal["Category", "Item Name"]
+ScanStatus = Literal["queued", "scanning", "evaluating", "saving", "completed", "failed"]
 
 
 def parse_target_type(value: Any) -> str:
@@ -43,6 +49,21 @@ def _parse_keywords(value: Any) -> tuple[str, ...]:
     return ()
 
 
+def _safe_https_url(value: Any, *, carousell_only: bool = False) -> str:
+    text = str(value or "").strip()
+    if not text or len(text) > 3000:
+        return ""
+    parsed = urlsplit(text)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return ""
+    if carousell_only and parsed.hostname.casefold() not in {
+        "carousell.ph",
+        "www.carousell.ph",
+    }:
+        return ""
+    return text
+
+
 @dataclass(frozen=True)
 class Listing:
     """Scraped marketplace listing representation.
@@ -70,31 +91,62 @@ class Listing:
     def from_mapping(cls, data: Mapping[str, Any]) -> Listing:
         raw_price = data.get("price")
         price = float(raw_price) if raw_price is not None and str(raw_price).strip() != "" else None
+        if price is not None and not math.isfinite(price):
+            price = None
+        link = _safe_https_url(data.get("link"), carousell_only=True)
+        thumbnail_url = _safe_https_url(data.get("thumbnail_url")) or None
+        seller_rating = (
+            float(data["seller_rating"]) if data.get("seller_rating") is not None else None
+        )
+        if seller_rating is not None and (
+            not math.isfinite(seller_rating) or not 0 <= seller_rating <= 5
+        ):
+            seller_rating = None
+        seller_rating_count = (
+            int(data["seller_rating_count"])
+            if data.get("seller_rating_count") is not None
+            else None
+        )
+        if seller_rating_count is not None and seller_rating_count < 0:
+            seller_rating_count = None
+        like_count = int(data["like_count"]) if data.get("like_count") is not None else None
+        if like_count is not None and like_count < 0:
+            like_count = None
         return cls(
-            id=_clean_str(data.get("id")),
-            title=_clean_str(data.get("title")),
+            id=_clean_str(data.get("id"))[:300],
+            title=_clean_str(data.get("title"))[:500],
             price=price,
-            condition=_clean_str(data.get("condition")),
+            condition=_clean_str(data.get("condition"))[:120],
             description=str(data.get("description", "")).strip(),
-            link=str(data.get("link", "")).strip(),
-            seller=_clean_str(data.get("seller")),
-            category=_clean_str(data.get("category")),
-            thumbnail_url=data.get("thumbnail_url"),
-            seller_rating=float(data["seller_rating"]) if data.get("seller_rating") is not None else None,
-            seller_rating_count=int(data["seller_rating_count"]) if data.get("seller_rating_count") is not None else None,
-            like_count=int(data["like_count"]) if data.get("like_count") is not None else None,
-            location=data.get("location"),
-            listing_timestamp=data.get("listing_timestamp"),
-            price_flag=_clean_str(data.get("price_flag") or data.get("price_status") or "Normal"),
+            link=link,
+            seller=_clean_str(data.get("seller"))[:300],
+            category=_clean_str(data.get("category"))[:200],
+            thumbnail_url=thumbnail_url,
+            seller_rating=seller_rating,
+            seller_rating_count=seller_rating_count,
+            like_count=like_count,
+            location=_clean_str(data.get("location"))[:300] or None,
+            listing_timestamp=_clean_str(data.get("listing_timestamp"))[:200] or None,
+            price_flag=_clean_str(
+                data.get("price_flag") or data.get("price_status") or "Normal"
+            )[:80],
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @property
+    def source_id(self) -> str:
+        """Return the marketplace ID or a deterministic scan-safe fallback."""
+        if self.id.strip():
+            return self.id.strip()
+        seed = f"{self.link}\n{self.title}".encode("utf-8")
+        return f"generated-{hashlib.sha256(seed).hexdigest()[:32]}"
+
 
 @dataclass(frozen=True)
-class PriceListTarget:
-    """Target reference row maintained in Google Sheets 'Price List' tab."""
+class Target:
+    """Provider-neutral product target used by the scanner and web application."""
 
     item_name: str
     category: str
@@ -105,13 +157,31 @@ class PriceListTarget:
     notes: str = ""
     target_type: str = "Hardware"
     allow_bundle_check: bool = False
+    search_mode: SearchMode = "Category"
+    enabled: bool = True
+    id: str | None = None
+    owner_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.item_name.strip():
+            raise ValueError("Target item_name is required.")
+        if not math.isfinite(self.deal_price) or self.deal_price <= 0:
+            raise ValueError("Target deal_price must be a finite positive number.")
+        if self.retail_price is not None and (
+            not math.isfinite(self.retail_price) or self.retail_price <= 0
+        ):
+            raise ValueError("Target retail_price must be a finite positive number or null.")
+        if self.search_mode not in {"Category", "Item Name"}:
+            raise ValueError("Target search_mode must be Category or Item Name.")
+        if self.search_mode == "Category" and not self.category.strip():
+            raise ValueError("Category search targets require a category.")
 
     @property
     def is_game_target(self) -> bool:
         return self.target_type == "Game"
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> PriceListTarget:
+    def from_mapping(cls, data: Mapping[str, Any]) -> Target:
         item_name = _clean_str(data.get("Item Name") or data.get("item_name"))
         category = _clean_str(data.get("Category") or data.get("category"))
         raw_deal_price = data.get("Deal Price (PHP)") or data.get("deal_price")
@@ -130,6 +200,15 @@ class PriceListTarget:
         )
         notes = str(data.get("Notes") or data.get("notes") or "").strip()
 
+        raw_mode = _clean_str(data.get("Search Mode") or data.get("search_mode") or "Category")
+        normalized_mode: SearchMode
+        if raw_mode.casefold() == "category":
+            normalized_mode = "Category"
+        elif raw_mode.casefold() == "item name":
+            normalized_mode = "Item Name"
+        else:
+            raise ValueError("Search Mode must be Category or Item Name.")
+
         return cls(
             item_name=item_name,
             category=category,
@@ -142,7 +221,128 @@ class PriceListTarget:
             allow_bundle_check=parse_bundle_check(
                 data.get("Allow Bundle Check", data.get("allow_bundle_check"))
             ),
+            search_mode=normalized_mode,
+            enabled=bool(data.get("enabled", True)),
+            id=_clean_str(data.get("id")) or None,
+            owner_id=_clean_str(data.get("owner_id")) or None,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def to_scanner_mapping(self) -> dict[str, Any]:
+        """Return the legacy-shaped boundary payload expected by scanner modules."""
+        return {
+            "id": self.id,
+            "owner_id": self.owner_id,
+            "Item Name": self.item_name,
+            "Category": self.category,
+            "Search Mode": self.search_mode,
+            "Deal Price (PHP)": self.deal_price,
+            "Retail Price (PHP)": self.retail_price,
+            "Keyword for Condition Downsizing": list(self.downsizing_keywords),
+            "Keyword for Finding Freebies": list(self.freebie_keywords),
+            "Notes": self.notes,
+            "Target Type": self.target_type,
+            "Allow Bundle Check": self.allow_bundle_check,
+            "enabled": self.enabled,
+        }
+
+
+# Temporary compatibility name while the existing deterministic engine migrates
+# away from its former Google Sheets terminology.
+PriceListTarget = Target
+
+
+@dataclass(frozen=True)
+class ScanRun:
+    """Canonical lifecycle record for one user-requested scan."""
+
+    id: str
+    owner_id: str
+    status: ScanStatus
+    listings_count: int = 0
+    candidates_count: int = 0
+    deals_count: int = 0
+    safe_error: str | None = None
+    target_snapshot: tuple[dict[str, Any], ...] = ()
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> ScanRun:
+        status = _clean_str(data.get("status"))
+        if status not in {"queued", "scanning", "evaluating", "saving", "completed", "failed"}:
+            raise ValueError(f"Invalid scan status '{status}'.")
+
+        def parse_time(value: Any) -> datetime | None:
+            if value in (None, ""):
+                return None
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+        snapshot = data.get("target_snapshot") or ()
+        if not isinstance(snapshot, (list, tuple)) or not all(isinstance(v, Mapping) for v in snapshot):
+            raise ValueError("Scan target_snapshot must be a list of objects.")
+        return cls(
+            id=_clean_str(data.get("id")),
+            owner_id=_clean_str(data.get("owner_id")),
+            status=status,  # type: ignore[arg-type]
+            listings_count=int(data.get("listings_count") or 0),
+            candidates_count=int(data.get("candidates_count") or 0),
+            deals_count=int(data.get("deals_count") or 0),
+            safe_error=_clean_str(data.get("safe_error")) or None,
+            target_snapshot=tuple(dict(value) for value in snapshot),
+            created_at=parse_time(data.get("created_at")),
+            started_at=parse_time(data.get("started_at")),
+            completed_at=parse_time(data.get("completed_at")),
+        )
+
+
+@dataclass(frozen=True)
+class Evaluation:
+    """Canonical deterministic/model decision for one listing and target."""
+
+    listing_source_id: str
+    target_snapshot_id: str
+    accepted: bool
+    matched_item: str | None = None
+    target_id: str | None = None
+    target_snapshot: dict[str, Any] = field(default_factory=dict)
+    audit_source: AuditSource | None = None
+    confidence: int | None = None
+    specs_matched: bool | None = None
+    local_match_score: float | None = None
+    issues: tuple[str, ...] = ()
+    freebies: tuple[str, ...] = ()
+    final_condition: str | None = None
+    condition_overridden: bool = False
+    deal_price: float | None = None
+    retail_price: float | None = None
+    evaluated_price: float | None = None
+    savings: float | None = None
+    acceptance_reason: str | None = None
+    is_bundle: bool = False
+    individual_price: float | None = None
+    price_evidence: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.listing_source_id.strip():
+            raise ValueError("Evaluation listing_source_id is required.")
+        try:
+            uuid.UUID(self.target_snapshot_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("Evaluation target_snapshot_id must be a UUID.") from exc
+        if str(self.target_snapshot.get("id") or "") != self.target_snapshot_id:
+            raise ValueError(
+                "Evaluation target_snapshot_id must match target_snapshot.id."
+            )
+        if self.confidence is not None and not 0 <= self.confidence <= 100:
+            raise ValueError("Evaluation confidence must be between 0 and 100.")
+        if self.local_match_score is not None and not 0 <= self.local_match_score <= 100:
+            raise ValueError("Evaluation local_match_score must be between 0 and 100.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

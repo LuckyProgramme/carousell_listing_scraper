@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -14,17 +15,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-
 from .config import BASE_DIR
 from .deal_engine import CascadeResult, run_two_stage_cascade
-from .scraper import ScrapeBatchResult, ScraperError, scrape_price_list_sources
-from .sheets_handler import PriceListError, read_price_list_rows
-from .sheets_writer import SheetsWriterError, write_outputs
+from .scraper import ScrapeBatchResult, scrape_price_list_sources
+from .sheets_handler import read_price_list_rows
+from .sheets_writer import write_outputs
 
 
-LOG_FILE = Path(BASE_DIR) / "logs" / "deal_finder.log"
-AUDIT_LOG_DIR = Path(BASE_DIR) / "logs"
+RUNTIME_LOG_DIR = Path(os.getenv("DEAL_FINDER_LOG_DIR", str(Path(BASE_DIR) / "logs")))
+LOG_FILE = RUNTIME_LOG_DIR / "deal_finder.log"
+AUDIT_LOG_DIR = RUNTIME_LOG_DIR
 
 # Patterns for secret redaction in logging
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -206,24 +206,31 @@ def run_pipeline(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the pipeline and return a shell-compatible status code."""
+    """Start or resume a Supabase-backed scan and return a shell status code."""
     parser = argparse.ArgumentParser(description="Find price-qualified Carousell deals.")
     parser.add_argument(
-        "--dry-run",
-        "--audit",
-        dest="dry_run",
-        action="store_true",
-        help="Run the cascade and write an audit JSON report without updating Google Sheets.",
+        "--scan-id",
+        help="Run an existing queued scan (used by Cloud Run).",
     )
     args = parser.parse_args(argv)
     configure_logging()
     try:
-        summary = run_pipeline(dry_run=args.dry_run)
-    except ScraperError as error:
-        logging.error("Scraper failure: %s", error)
-        print(f"Scrape stopped safely: {error}", file=sys.stderr)
-        return 1
-    except (requests.RequestException, PriceListError, SheetsWriterError) as error:
+        from .repository import RepositoryError
+        from .scan_service import ScanExecutionError, run_repository_scan
+        from .supabase_repository import SupabaseRepository
+
+        repository = SupabaseRepository.from_env()
+        if args.scan_id:
+            scan_id = args.scan_id
+        else:
+            owner_id = os.getenv("SUPABASE_OWNER_ID", "").strip()
+            if not owner_id:
+                raise RepositoryError(
+                    "SUPABASE_OWNER_ID is required when starting a scan from the CLI."
+                )
+            scan_id = repository.create_scan(owner_id).id
+        summary = run_repository_scan(repository, scan_id)
+    except (RepositoryError, ScanExecutionError) as error:
         logging.error("Pipeline failure: %s", error)
         print(f"Deal finder failed: {error}", file=sys.stderr)
         return 1
@@ -232,16 +239,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Deal finder failed unexpectedly. See logs\\deal_finder.log for details.", file=sys.stderr)
         return 1
 
-    if summary["dry_run"]:
-        print(
-            f"Audit complete: {summary['scraped']} listings scanned, "
-            f"{summary['candidates']} candidates, {summary['deals']} accepted deals. "
-            f"Report: {summary['audit_report']}"
-        )
-    else:
-        print(
-            f"Done: {summary['scraped']} listings scanned, {summary['deals']} deals found."
-        )
+    print(
+        f"Done: {summary.listings_count} listings scanned, "
+        f"{summary.deals_count} deals found."
+    )
     return 0
 
 

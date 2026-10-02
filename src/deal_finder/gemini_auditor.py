@@ -34,7 +34,12 @@ DEFAULT_TIMEOUT_RETRIES = GEMINI_TIMEOUT_RETRIES
 MAX_RETRIES = 3
 BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-PROMPT_PATH = Path(BASE_DIR) / "prompts" / "audit_v1.txt"
+PACKAGED_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "audit_v1.txt"
+PROMPT_PATH = (
+    PACKAGED_PROMPT_PATH
+    if PACKAGED_PROMPT_PATH.exists()
+    else Path(BASE_DIR) / "prompts" / "audit_v1.txt"
+)
 
 HttpPost = Callable[..., Any]
 Sleep = Callable[[float], None]

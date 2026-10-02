@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.env
+service_account.json
+logs
+tests
+Screenshot-Results
+project-context
+docs
+node_modules
+.next

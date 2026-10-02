@@ -1,149 +1,75 @@
-# Carousell Deal Finder
+# Deal Finder
 
-A two-stage Carousell deal finder for Google Sheets. The system retrieves recent Carousell listings, matches them against targets in a Google Sheets `Price List` tab, applies deterministic safety checks, and uses Gemini to audit likely matches before publishing confirmed deals.
+A private, single-user website that finds price-qualified Carousell listings, applies deterministic safety checks, asks Gemini to audit likely matches, and stores results in Supabase.
 
-## What is included
+## Supported architecture
 
-The final repository contains the application source, prompts, tests, and documentation. It does not contain credentials or local runtime configuration.
+- Next.js on Vercel Hobby provides email/password login, editable targets, Scan Now, progress, and Compact List results. Short server routes dispatch work; Vercel does not run the scraper.
+- GitHub Actions runs the Python scanner only after Scan Now. The manual workflow is [scan.yml](.github/workflows/scan.yml).
+- Supabase is the only application persistence layer. Owner-scoped Row Level Security protects browser reads and target edits; private server keys handle scan writes.
+- Gemini audits candidates inside the runner. Its key never reaches the browser or Vercel.
 
-Keep these files local and never commit them:
+Use the [step-by-step deployment guide](docs/vercel-github-actions.md) for provider settings, private secret entry, account gates, and recovery. The [approved specification](docs/superpowers/specs/2026-10-02-vercel-github-actions-design.md) and [implementation plan](docs/superpowers/plans/2026-10-02-vercel-github-actions-implementation.md) record the agreed scope. Local checks do not prove that production login or a hosted scan works; that requires one controlled end-to-end run.
 
-- `.env` — Gemini API key, spreadsheet ID, and local settings.
-- `service_account.json` — Google service-account private credentials.
-- `logs/` — audit reports and runtime logs.
-- exported spreadsheets such as `deal_finder_result.xlsx`.
+Scans are manual, one can be active at a time, and whole scans are not automatically retried. There is no application-enforced 30-minute scan limit; measure the first complete scan before choosing one. GitHub platform limits still apply. Do not enable paid plans, larger runners, storage overage, or Google Cloud billing. Vercel Hobby is personal/non-commercial, and its scraper policy remains a caveat discussed in the guide.
 
-## Requirements
+## Local setup
 
-- Windows, macOS, or Linux
-- Python 3.10 or newer
-- A Google Cloud service account with Google Sheets API access
-- A Gemini API key
-- A Google Sheet shared with the service-account email address
-
-Install the runtime dependencies manually when `pyproject.toml` is not included:
+Use Node.js **24.x**, Python **3.12**, and uv **0.11.24** for the deployment-matching environment. The Python package supports >=3.10, but the hosted workflow uses 3.12. Install from the checked-in lockfiles:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install beautifulsoup4 requests gspread rapidfuzz
+uv sync --locked --python 3.12
+npm ci
 ```
 
-Install `pytest` as well if you want to run the test suite:
-
-```powershell
-python -m pip install pytest
-```
-
-## Local configuration
-
-Copy `.env.example` to `.env` and replace the placeholders:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Example configuration:
+For Next.js, create `.env.local` only if it does not already exist. Copy just these names from [.env.example](.env.example) and fill them privately:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.1-flash-lite
-GEMINI_AUDIT_CHUNK_SIZE=20
-GEMINI_AUDIT_TIMEOUT_SECONDS=30
-GEMINI_TIMEOUT_RETRIES=1
-
-SPREADSHEET_ID=your_google_spreadsheet_id_here
-SERVICE_ACCOUNT_FILE=service_account.json
-
-REQUEST_DELAY_SECONDS=5
-DEFAULT_TIMEOUT_SECONDS=15.0
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+ALLOWED_USER_EMAIL=dealfinder0322@gmail.com
 ```
 
-The application loads `.env` automatically. The real Gemini key, service-account JSON, and spreadsheet ID belong only in local files or environment variables.
+Run `npm run dev` and open `http://localhost:3000`. Login and target access need the existing Supabase account/project. The scan routes additionally need the server settings in the deployment guide, including explicit `FRONTEND_ORIGIN=http://localhost:3000`. Supplying those settings locally can dispatch a real hosted scan; do so only deliberately after the rollout gates. Missing scan configuration fails safely rather than launching a scanner.
 
-## Google Sheets setup
+Python reads root `.env`; Next.js reads `.env.local`. Neither file belongs in Git. Do not overwrite an existing file with a downloaded provider configuration. No local credential file is needed for offline unit tests.
 
-1. Create or select a Google Cloud project.
-2. Enable the Google Sheets API.
-3. Create a service account and download its JSON key locally as `service_account.json`.
-4. Copy the service account's `client_email`.
-5. Share the target Google Sheet with that email address as an Editor.
-6. Put the spreadsheet ID from the Sheet URL into `.env`.
+## Database and product behavior
 
-The application reads the `Price List` tab by column name. The current seeded header layout is:
+[20260930000000_hosted_deal_finder.sql](supabase/migrations/20260930000000_hosted_deal_finder.sql) defines `targets`, `scan_runs`, `listings`, and `evaluations`, RLS, the one-active-scan index, immutable target snapshots, and daily three-day cleanup. The user already applied this SQL manually. The live schema has been inspected, but migration history is still empty; follow the guide's separate [baseline procedure](docs/vercel-github-actions.md#migration-history-baseline-separate-administrative-gate), not another SQL application or `db push`.
 
-```text
-Item Name | Category | Search Mode | Retail Price (PHP) | Deal Price (PHP) | Keyword for Condition Downsizing | Keyword for Finding Freebies | Notes | Target Type | Allow Bundle Check
-```
+- Only `dealfinder0322@gmail.com` is allowed. Public registration and anonymous login must remain off. Do not recreate the existing confirmed Auth user or reimport the existing target.
+- Targets can be added, edited, enabled, disabled, or deleted. Targets are snapshotted when a queued scan is claimed; edits after that affect the next scan.
+- Dashboard status follows the newest scan. Deals and All Listings show only the newest completed scan, even when a newer scan is queued, running, or failed.
+- Listing rows display remote Carousell thumbnail URLs and an accessible fallback; pictures are not copied into Supabase Storage.
+- **Release if stuck** changes only the owner's queued scan older than the configured threshold (15 minutes by default). It never interrupts scanning, evaluating, or saving work. Running recovery requires the guide's manual investigation.
+- The daily database cleanup removes scans older than three days and their listings/evaluations. Targets and the Auth user remain. This 72-hour rule is backend cleanup, not a frontend result filter.
 
-Existing sheets remain compatible:
-
-- Blank or missing `Search Mode` means `Category`.
-- `Category` mode requires a recognized category and uses its recent-first Carousell category URL.
-- `Item Name` mode searches the exact normalized Item Name and ignores Category for retrieval.
-- Blank or missing `Target Type` means `Hardware`; the supported explicit value for game software is `Game`.
-- Blank, missing, `FALSE`, `No`, or `0` in `Allow Bundle Check` means false.
-- `TRUE`, `Yes`, or `1` enables bundle checking for that target.
-
-Column order may vary because headers are matched by name. Existing populated rows are not rearranged automatically.
-
-## Running the application without `pyproject.toml`
-
-Because the source uses a `src` layout, set `PYTHONPATH` from the project root before running commands:
+## Offline checks
 
 ```powershell
-$env:PYTHONPATH = "$PWD\src"
+uv lock --check
+uv run --locked python -m pytest -q
+uv run --locked python -m compileall -q src scripts
+npm run test:web
+npm run typecheck
+npm run lint
+npm run build
+git diff --check
 ```
 
-Run a read-only audit first:
+Validate `.github/workflows/scan.yml` with the verified/pinned actionlint executable described by the rollout coordinator. Python/web tests use fake boundaries and block unmocked network requests. A test result is not proof of hosted Linux execution, production Auth/RLS, or live Carousell/Gemini access. `npm run build` needs public Supabase configuration; privileged scan settings are read at request time and are not needed for a compile-only build.
 
-```powershell
-python -m deal_finder.deal_finder --audit
-```
+The isolated [manual Dashboard fixture](tests/web/manual/README.md) renders the actual UI with fake data over a local HTTP preview. Opening its HTML directly as a `file://` URL does not compile its TypeScript and is not a production login bypass.
 
-`--audit` and `--dry-run` scrape Carousell and call Gemini without writing Google Sheets. They create a local report under `logs/`, including source summaries, Gemini chunk results, fallback comparisons, and validated decisions.
+## Temporary and legacy files
 
-Run the normal publishing pipeline only after reviewing an audit:
+The temporary **Supabase-backed CLI** (`deal-finder`, [find_deal.bat](find_deal.bat)) remains until the web workflow is verified. It requires `SUPABASE_OWNER_ID` plus private Supabase/Gemini configuration and starts real work; it is not an offline check. The hosted worker uses `python -m deal_finder.scan_job` with workflow-supplied `SCAN_RUN_ID` and configured `ALLOWED_USER_ID`, not the local CLI launcher.
 
-```powershell
-python -m deal_finder.deal_finder
-```
+[dispatcher.py](src/deal_finder/dispatcher.py), [Dockerfile](Dockerfile), and the [Cloud Run guide](docs/cloud-run-backend.md) are retained unused legacy source. The new web scan/recovery routes do not call them. Flask, Gunicorn, and Google dependencies are not retired in this rollout; some Google libraries also support the legacy Sheets modules. `sheets_handler.py`, `sheets_writer.py`, and the older Sheets `run_pipeline` path remain compatibility source, not the supported hosted persistence path. Do not run that legacy path as a verification command. Remove legacy code/dependencies and the temporary CLI only in a reviewed follow-up after online acceptance.
 
-Normal runs write validated results to `Current Deals`, `All Listings`, and `History`. Only Gemini-approved deals are published when Gemini is available. Local fallback decisions remain comparison data in audit mode.
+## Security
 
-## Current matching behavior
+Never put `SUPABASE_SECRET_KEY`, `GITHUB_ACTIONS_TOKEN`, or `GEMINI_API_KEY` in a `NEXT_PUBLIC_*` variable. Enter production keys directly in protected provider settings; never paste them into chat, code, workflow inputs, logs, or result rows. Vercel Production has the dispatch token and server-only Supabase secret; GitHub Actions has Supabase/Gemini secrets. Preview deployments must not have production dispatch credentials and are blocked by the runtime guard.
 
-- Item Name searches use Carousell's recent-first URL and retain the first 20 results.
-- Category searches retain the complete first result page.
-- Candidate matching applies model, accessory, target-source, and price gates before Gemini.
-- Gemini audits run in sequential chunks of 20 candidates by default, with a 30-second timeout and one timeout retry.
-- Gemini responses must pass the target whitelist, confidence, specification, and accessory checks.
-- A bundle requires `Allow Bundle Check=TRUE`, a displayed listing price no higher than 3× the target Deal Price, and an explicit current individual asking price with permission to buy separately.
-- Bundle totals are never divided or estimated. Bundles do not populate freebies, and other items in the same post do not create additional target deals.
-- For accepted split deals, Current Deals and History use the verified individual price. All Listings retains the original listing price.
-
-## Testing
-
-```powershell
-$env:PYTHONPATH = "$PWD\src"
-python -m pytest -q
-```
-
-The optional live Carousell test is disabled unless explicitly enabled:
-
-```powershell
-$env:RUN_LIVE_CAROUSELL_TESTS = "1"
-python -m pytest -q -m live
-```
-
-## Security checklist
-
-Before pushing to GitHub, confirm that these are absent from the commit:
-
-```powershell
-git status --short
-git diff --cached --name-only
-```
-
-Do not force-add `.env`, `service_account.json`, logs, spreadsheet exports, virtual environments, or temporary files. If a credential was ever pushed, rotate it; deleting the file in a later commit does not remove it from Git history.
+Marketplace text and model output are untrusted. Existing independent price, specification, accessory, confidence, and bundle checks still decide acceptance. Safe user errors omit provider payloads and stack traces. Rotate any disclosed credential promptly; deleting it from a file does not remove Git history.

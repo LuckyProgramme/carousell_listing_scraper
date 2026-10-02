@@ -306,6 +306,51 @@ def _seller_from(card: Mapping[str, Any]) -> str:
     return ""
 
 
+def _thumbnail_from(card: Mapping[str, Any], base_url: str) -> str | None:
+    """Extract one HTTPS thumbnail without depending on a single card schema."""
+    direct_keys = (
+        "thumbnailUrl",
+        "thumbnail_url",
+        "imageUrl",
+        "image_url",
+        "photoUrl",
+        "photo_url",
+    )
+    nested_keys = ("thumbnail", "image", "photo", "coverPhoto", "cover_photo")
+    url_keys = ("url", "src", "imageUrl", "image_url", "highResUrl", "high_res_url")
+
+    def normalize(value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        url = urljoin(base_url, value.strip())
+        parsed = urlsplit(url)
+        return url if parsed.scheme == "https" and parsed.hostname else None
+
+    for key in direct_keys:
+        if url := normalize(card.get(key)):
+            return url
+    for key in nested_keys:
+        value = card.get(key)
+        if isinstance(value, Mapping):
+            for url_key in url_keys:
+                if url := normalize(value.get(url_key)):
+                    return url
+        elif url := normalize(value):
+            return url
+    for key in ("images", "photos", "media"):
+        values = card.get(key)
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+            continue
+        for value in values:
+            if isinstance(value, Mapping):
+                for url_key in url_keys:
+                    if url := normalize(value.get(url_key)):
+                        return url
+            elif url := normalize(value):
+                return url
+    return None
+
+
 def _listing_link(title: str, listing_id: str, raw_link: str, base_url: str) -> str:
     """Return the supplied link, or construct Carousell's canonical title-ID URL."""
     if raw_link:
@@ -330,6 +375,7 @@ def _normalise_card(card: Mapping[str, Any], base_url: str) -> dict[str, Any] | 
         "description": _description_from(card),
         "link": _listing_link(title, listing_id, raw_link, base_url),
         "seller": _seller_from(card),
+        "thumbnail_url": _thumbnail_from(card, base_url),
     }
 
 
@@ -424,6 +470,16 @@ def extract_from_html_fallback(page_html: str, base_url: str = CAROUSELL_BASE_UR
             continue
         link_node = card.select_one("a[href]")
         raw_link = link_node.get("href", "") if link_node else ""
+        image_node = card.select_one("img")
+        raw_thumbnail = ""
+        if image_node:
+            raw_thumbnail = str(image_node.get("src") or image_node.get("data-src") or "")
+            if not raw_thumbnail:
+                first_srcset = str(image_node.get("srcset") or "").split(",", maxsplit=1)[0]
+                raw_thumbnail = first_srcset.split()[0] if first_srcset.split() else ""
+        thumbnail_url = urljoin(base_url, raw_thumbnail) if raw_thumbnail else None
+        if thumbnail_url and urlsplit(thumbnail_url).scheme != "https":
+            thumbnail_url = None
         listings.append(
             {
                 "id": card.get("data-listing-id", card.get("data-id", "")),
@@ -433,6 +489,7 @@ def extract_from_html_fallback(page_html: str, base_url: str = CAROUSELL_BASE_UR
                 "description": _text_from(card, ('[data-testid*="description"]', ".description")),
                 "link": urljoin(base_url, raw_link) if raw_link else "",
                 "seller": _text_from(card, ('[data-testid*="seller"]', ".seller")),
+                "thumbnail_url": thumbnail_url,
             }
         )
     return _deduplicate(listings)

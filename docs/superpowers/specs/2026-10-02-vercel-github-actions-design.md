@@ -1,7 +1,7 @@
 # Deal Finder: Vercel Hobby and GitHub Actions design
 
 Date: 2026-10-02 (Asia/Manila)
-Status: conversational architecture approved; written specification awaiting review.
+Status: written specification reviewed and approved by the user on 2026-10-02; [implementation plan](../plans/2026-10-02-vercel-github-actions-implementation.md) prepared for review.
 Supersedes: the Cloud Run execution and dispatcher decisions in the 2026-09-30 hosted design. Other approved product decisions continue to apply.
 
 ## Purpose and success criteria
@@ -118,4 +118,4 @@ Run the existing Python suite and frontend typecheck, lint, and production build
 
 Rollout requires the workflow on the correct branch, provider secrets entered privately, spending controls verified, Vercel production connected, and production Auth URL settings correct. Perform one controlled Scan Now run and verify its correlated Actions execution, stage updates, saved counts/results, thumbnail fallback, preserved target snapshot, and newest-completed result selection. Confirm a second click cannot create concurrent work. Record actual duration and any Carousell/Gemini access errors from the hosted runner without bypassing access controls.
 
-The hosted rebuild remains incomplete until that run succeeds. This document records the design; implementation and deployment still await the appropriate review stages.
+The hosted rebuild remains incomplete until that run succeeds. This document records the approved design; implementation awaits review of the concrete implementation plan and selection of its execution method.

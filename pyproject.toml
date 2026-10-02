@@ -8,10 +8,15 @@ dependencies = [
     "requests>=2.31",
     "gspread>=6.0",
     "rapidfuzz>=3.0",
+    "flask>=3.1",
+    "google-auth>=2.40",
+    "gunicorn>=23.0; platform_system != 'Windows'",
 ]
 
 [project.scripts]
 deal-finder = "deal_finder.deal_finder:main"
+deal-finder-dispatcher = "deal_finder.dispatcher:main"
+deal-finder-scan-job = "deal_finder.scan_job:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -20,9 +25,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/deal_finder"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"prompts/audit_v1.txt" = "deal_finder/prompts/audit_v1.txt"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pyyaml==6.0.3",
 ]
 
 [tool.pytest.ini_options]
@@ -32,4 +41,3 @@ norecursedirs = [".venv", "__pycache__", ".pytest_cache", "pytest-cache-files-*"
 markers = [
     "live: makes a real request to Carousell (disabled unless RUN_LIVE_CAROUSELL_TESTS=1)",
 ]
-
