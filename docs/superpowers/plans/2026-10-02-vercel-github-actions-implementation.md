@@ -1,7 +1,7 @@
 # Vercel and GitHub Actions implementation plan
 
 Date: 2026-10-02 (Asia/Manila)
-Status: Tasks 1-8 locally implemented and verified. The user authorized all remaining tasks, orchestrated delegates, and publication through a pull request. Tasks 9-10 remain pending private account/secret setup and controlled hosted acceptance. No billing or automatic scan authority is inferred.
+Status: Tasks 1-8 locally implemented and verified; [PR #2](https://github.com/LuckyProgramme/carousell_listing_scraper/pull/2) is published, open and unmerged. The user authorized all remaining tasks, orchestrated delegates, and publication through a pull request, not an automatic merge. Tasks 9-10 remain pending merge authorization, private account/secret setup and controlled hosted acceptance. No billing or automatic scan authority is inferred.
 Design: [approved specification](../specs/2026-10-02-vercel-github-actions-design.md).
 
 ## Outcome and execution scope

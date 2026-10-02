@@ -48,6 +48,9 @@ Updates:
 - Boundaries: no secrets or runtime data published, no paid service/billing, no live scan or provider mutation before local acceptance and required user setup/authorization. Do not claim deployment or spending controls from local tests.
 - Handoff/next action: Tasks 6-8 completed locally. User approved publishing through a PR; root stages reviewed application/workflow/docs only, excludes credentials/runtime data/unrelated review notes, and publishes a PR without merging. Task 9 requires user review/merge and private settings: spending/free-tier verification, GitHub secrets/token, Vercel import/settings, production Auth URLs, migration baseline, then one controlled hosted scan. Root refreshed context as usage-limit fallback; no production acceptance claimed.
 
+Updates:
+- 2026-10-02 — publication completed — Application commit `273afee` pushed to `codex/vercel-github-actions-rollout`; [PR #2](https://github.com/LuckyProgramme/carousell_listing_scraper/pull/2) created and attached to this chat. GitHub readback reports open, unmerged, clean/mergeable against `main` at `96857a4`. The prior design-spec commit is also included. No merge/deployment/workflow dispatch occurred. Only unrelated `REFACTORING_AND_CODE_REVIEW.md` remains untracked and preserved; credentials/runtime paths were excluded. Final staged whitespace check and 183 Python regressions passed after formatting normalization. Await merge authorization and user private setup; do not retry unavailable agents or mark BUILD-001 complete.
+
 ### BUILD-004: Task 5 GitHub runner safety
 - Owner: root coordinator and implementation; planned independent review: task5_inspector; context refresh: Lily after verification
 - Status: completed locally
